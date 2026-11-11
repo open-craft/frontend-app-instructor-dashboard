@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import { useCourseInfo } from '@src/data/apiHook';
 import { useAlert } from '@src/providers/AlertProvider';
 import { useWidgetProps } from '../slots/SlotUtils';
+import { useEnrollmentAccess } from '@src/courseTeam/data/apiHook';
 import { DashboardConfigProvider } from '@src/dashboardConfig/DashboardConfigContext';
 import { instructorDashboardConfig } from '@src/dashboardConfig/configs';
 import userEvent from '@testing-library/user-event';
@@ -19,6 +20,9 @@ jest.mock('react-router-dom', () => ({
 
 jest.mock('@src/data/apiHook', () => ({
   useCourseInfo: jest.fn(),
+}));
+jest.mock('@src/courseTeam/data/apiHook', () => ({
+  useEnrollmentAccess: jest.fn(),
 }));
 jest.mock('@src/providers/AlertProvider', () => ({
   useAlert: jest.fn(),
@@ -45,6 +49,7 @@ describe('InstructorNav', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (useAlert as jest.Mock).mockReturnValue({ clearAlerts: mockClearAlerts });
+    (useEnrollmentAccess as jest.Mock).mockReturnValue({ restricted: false, isPending: false });
   });
 
   it('renders loading skeleton when loading', () => {
@@ -89,6 +94,107 @@ describe('InstructorNav', () => {
     expect(tabLinks[1]).toHaveTextContent('Tab 2');
     expect(tabLinks[2]).toHaveTextContent('Tab 1');
     expect(tabLinks[3]).toHaveTextContent('Tab 3');
+  });
+
+  it('hides enrollments for a restricted role', () => {
+    (useParams as jest.Mock).mockReturnValue({ courseId: 'course-v1:edX+DemoX+Demo_Course' });
+    (useCourseInfo as jest.Mock).mockReturnValue({
+      data: { username: 'testuser', tabs: [{ tabId: 'enrollments', url: '/enrollments', title: 'Enrollments', sortOrder: 1 }] },
+      isLoading: false,
+    });
+    (useEnrollmentAccess as jest.Mock).mockReturnValue({ restricted: true });
+    (useWidgetProps as jest.Mock).mockReturnValue([]);
+
+    renderNav();
+
+    expect(screen.queryByText('Enrollments')).not.toBeInTheDocument();
+  });
+
+  it('keeps enrollments visible for other roles', () => {
+    (useParams as jest.Mock).mockReturnValue({ courseId: 'course-v1:edX+DemoX+Demo_Course' });
+    (useCourseInfo as jest.Mock).mockReturnValue({
+      data: { username: 'testuser', tabs: [{ tabId: 'enrollments', url: '/enrollments', title: 'Enrollments', sortOrder: 1 }] },
+      isLoading: false,
+    });
+    (useWidgetProps as jest.Mock).mockReturnValue([]);
+
+    renderNav();
+
+    expect(screen.getByText('Enrollments')).toBeInTheDocument();
+  });
+
+  it('hides enrollments but keeps course team visible when the team lookup is forbidden', () => {
+    (useParams as jest.Mock).mockReturnValue({ courseId: 'course-v1:edX+DemoX+Demo_Course' });
+    (useCourseInfo as jest.Mock).mockReturnValue({
+      data: {
+        username: 'testuser',
+        tabs: [
+          { tabId: 'enrollments', url: '/enrollments', title: 'Enrollments', sortOrder: 1 },
+          { tabId: 'course_team', url: '/course_team', title: 'Course Team', sortOrder: 2 },
+        ],
+      },
+      isLoading: false,
+    });
+    (useEnrollmentAccess as jest.Mock).mockReturnValue({ restricted: true, error: { response: { status: 403 } } });
+    (useWidgetProps as jest.Mock).mockReturnValue([]);
+
+    renderNav();
+
+    expect(screen.queryByText('Enrollments')).not.toBeInTheDocument();
+    expect(screen.getByText('Course Team')).toBeInTheDocument();
+  });
+
+  it('keeps enrollments visible when the team lookup fails for another reason', () => {
+    (useParams as jest.Mock).mockReturnValue({ courseId: 'course-v1:edX+DemoX+Demo_Course' });
+    (useCourseInfo as jest.Mock).mockReturnValue({
+      data: { username: 'testuser', tabs: [{ tabId: 'enrollments', url: '/enrollments', title: 'Enrollments', sortOrder: 1 }] },
+      isLoading: false,
+    });
+    (useEnrollmentAccess as jest.Mock).mockReturnValue({ restricted: false, error: { response: { status: 500 } } });
+    (useWidgetProps as jest.Mock).mockReturnValue([]);
+
+    renderNav();
+
+    expect(screen.getByText('Enrollments')).toBeInTheDocument();
+  });
+
+  it('hides enrollments until the lookup settles', () => {
+    (useParams as jest.Mock).mockReturnValue({ courseId: 'course-v1:edX+DemoX+Demo_Course' });
+    (useCourseInfo as jest.Mock).mockReturnValue({
+      data: { username: 'testuser', tabs: [
+        { tabId: 'enrollments', url: '/enrollments', title: 'Enrollments', sortOrder: 1 },
+        { tabId: 'course_team', url: '/course_team', title: 'Course Team', sortOrder: 2 },
+      ] },
+      isLoading: false,
+    });
+    (useEnrollmentAccess as jest.Mock).mockReturnValue({ isPending: true });
+    (useWidgetProps as jest.Mock).mockReturnValue([]);
+
+    const { rerender } = renderNav();
+    expect(screen.queryByText('Enrollments')).not.toBeInTheDocument();
+    expect(screen.getByText('Course Team')).toBeInTheDocument();
+
+    (useEnrollmentAccess as jest.Mock).mockReturnValue({ isPending: false, restricted: false });
+    rerender(<DashboardConfigProvider value={instructorDashboardConfig}><InstructorNav /></DashboardConfigProvider>);
+    expect(screen.getByText('Enrollments')).toBeInTheDocument();
+  });
+
+  it('keeps CCX enrollments visible without instructor role data', () => {
+    (useParams as jest.Mock).mockReturnValue({ courseId: 'course-v1:edX+DemoX+Demo_Course' });
+    (useCourseInfo as jest.Mock).mockReturnValue({
+      data: { tabs: [{ tabId: 'enrollments', url: '/enrollments', title: 'Enrollments', sortOrder: 1 }] },
+      isLoading: false,
+    });
+    (useEnrollmentAccess as jest.Mock).mockReturnValue({ isPending: true });
+    (useWidgetProps as jest.Mock).mockReturnValue([]);
+
+    render(
+      <DashboardConfigProvider value={{ ...instructorDashboardConfig, variantId: 'ccxCoach' }}>
+        <InstructorNav />
+      </DashboardConfigProvider>
+    );
+
+    expect(screen.getByText('Enrollments')).toBeInTheDocument();
   });
 
   it('does not render slot tabs without tabId or title', () => {

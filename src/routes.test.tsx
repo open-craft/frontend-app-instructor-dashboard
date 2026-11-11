@@ -7,6 +7,11 @@ import { DashboardConfigProvider } from './dashboardConfig/DashboardConfigContex
 import { useWidgetProps } from './slots/SlotUtils';
 import { instructorDashboardRole } from './constants';
 import { renderWithIntl } from './testUtils';
+import { useEnrollmentAccess } from '@src/courseTeam/data/apiHook';
+
+jest.mock('@src/courseTeam/data/apiHook', () => ({
+  useEnrollmentAccess: jest.fn(),
+}));
 
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
@@ -67,6 +72,7 @@ const renderWithConfig = (element: React.ReactNode, config = testConfig) => (
 describe('routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (useEnrollmentAccess as jest.Mock).mockReturnValue({ restricted: false, isPending: false });
   });
 
   describe('shape', () => {
@@ -131,6 +137,68 @@ describe('routes', () => {
 
   describe('TabContent (:tabId child)', () => {
     const getElement = () => routes[0].children![1].element;
+
+    const enrollmentConfig = {
+      ...testConfig,
+      variantId: 'instructorDashboard',
+      defaultTabs: [{ tabId: 'enrollments', content: <div>Enrollment Content</div> }],
+      useTabsInfo: () => ({ isLoading: false, data: { username: 'testuser' } }),
+    };
+
+    it.each([
+      ['restricted role', { restricted: true }],
+      ['forbidden lookup', { restricted: true, error: { response: { status: 403 } } }],
+    ])('redirects direct enrollment access for a %s', (_description, access) => {
+      (useParams as jest.Mock).mockReturnValue({ courseId: 'course', tabId: 'enrollments' });
+      (useWidgetProps as jest.Mock).mockReturnValue([]);
+      (useEnrollmentAccess as jest.Mock).mockReturnValue({ isPending: false, ...access });
+
+      renderWithConfig(getElement(), enrollmentConfig);
+
+      expect(screen.queryByText('Enrollment Content')).not.toBeInTheDocument();
+      expect(Navigate).toHaveBeenCalledWith(expect.objectContaining({ to: '../tab_a', replace: true }), expect.anything());
+    });
+
+    it('does not render enrollments while the access lookup is pending', () => {
+      (useParams as jest.Mock).mockReturnValue({ courseId: 'course', tabId: 'enrollments' });
+      (useWidgetProps as jest.Mock).mockReturnValue([]);
+      (useEnrollmentAccess as jest.Mock).mockReturnValue({ isPending: true });
+
+      renderWithConfig(getElement(), enrollmentConfig);
+
+      expect(screen.queryByText('Enrollment Content')).not.toBeInTheDocument();
+      expect(Navigate).not.toHaveBeenCalled();
+    });
+
+    it('renders enrollments when access is allowed', () => {
+      (useParams as jest.Mock).mockReturnValue({ courseId: 'course', tabId: 'enrollments' });
+      (useWidgetProps as jest.Mock).mockReturnValue([]);
+
+      renderWithConfig(getElement(), enrollmentConfig);
+
+      expect(screen.getByText('Enrollment Content')).toBeInTheDocument();
+    });
+
+    it('renders enrollments when the access lookup fails for another reason', () => {
+      (useParams as jest.Mock).mockReturnValue({ courseId: 'course', tabId: 'enrollments' });
+      (useWidgetProps as jest.Mock).mockReturnValue([]);
+      (useEnrollmentAccess as jest.Mock).mockReturnValue({ restricted: false, isPending: false, error: { response: { status: 500 } } });
+
+      renderWithConfig(getElement(), enrollmentConfig);
+
+      expect(screen.getByText('Enrollment Content')).toBeInTheDocument();
+      expect(Navigate).not.toHaveBeenCalled();
+    });
+
+    it('does not apply the instructor guard to CCX enrollments', () => {
+      (useParams as jest.Mock).mockReturnValue({ courseId: 'course', tabId: 'enrollments' });
+      (useWidgetProps as jest.Mock).mockReturnValue([]);
+
+      renderWithConfig(getElement(), { ...enrollmentConfig, variantId: 'ccxCoach' });
+
+      expect(screen.getByText('Enrollment Content')).toBeInTheDocument();
+      expect(useEnrollmentAccess).not.toHaveBeenCalled();
+    });
 
     it('renders the matching defaultTabs content', () => {
       (useParams as jest.Mock).mockReturnValue({ tabId: 'tab_b' });

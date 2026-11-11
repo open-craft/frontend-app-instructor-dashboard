@@ -5,6 +5,7 @@ import { useAlert } from '@src/providers/AlertProvider';
 import { useAccessError } from '@src/providers/AccessErrorProvider';
 import { useWidgetProps } from '@src/slots/SlotUtils';
 import { useDashboardConfig } from '@src/dashboardConfig/DashboardConfigContext';
+import { useEnrollmentAccess } from '@src/courseTeam/data/apiHook';
 
 export interface TabProps {
   tabId: string,
@@ -15,8 +16,10 @@ export interface TabProps {
 
 const InstructorNav = () => {
   const { courseId = '', tabId = '' } = useParams<{ courseId: string, tabId?: string }>();
-  const { useTabsInfo, navTabsSlotId } = useDashboardConfig();
+  const { useTabsInfo, navTabsSlotId, variantId } = useDashboardConfig();
   const { data: courseInfo, isLoading } = useTabsInfo(courseId);
+  const { restricted, isPending } = useEnrollmentAccess(courseId, courseInfo?.username);
+  const showEnrollments = variantId !== 'instructorDashboard' || (!isPending && !restricted);
   const widgetPropsArray = useWidgetProps(navTabsSlotId) as TabProps[];
   const { clearAlerts } = useAlert();
   const { clearError, errorType } = useAccessError();
@@ -47,11 +50,13 @@ const InstructorNav = () => {
       tabMap.set(slotTab.tabId, slotTab);
     });
 
-    const allTabs = Array.from(tabMap.values());
+    const allTabs = Array.from(tabMap.values()).filter(
+      tab => tab.tabId !== 'enrollments' || showEnrollments
+    );
 
     // Tabs are sorted by sortOrder, with a fallback to 1000 to be placed at the end for tabs that don't have sortOrder defined (to avoid NaN issues)
     return allTabs.sort((a, b) => (a.sortOrder ?? 1000) - (b.sortOrder ?? 1000));
-  }, [courseInfo?.tabs, isLoading, widgetPropsArray, hasError]);
+  }, [courseInfo?.tabs, isLoading, widgetPropsArray, hasError, showEnrollments]);
 
   if (isLoading) {
     return <Skeleton className="lead" />;

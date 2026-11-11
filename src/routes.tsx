@@ -9,10 +9,22 @@ import {
   useDashboardConfig,
 } from './dashboardConfig/DashboardConfigContext';
 import { authenticatedLoader } from '@openedx/frontend-base';
+import { useEnrollmentAccess } from '@src/courseTeam/data/apiHook';
+
+const EnrollmentAccessGuard = ({ children }: { children: React.ReactNode }) => {
+  const { courseId = '' } = useParams<{ courseId: string }>();
+  const { useTabsInfo, defaultLandingTabId } = useDashboardConfig();
+  const { data, isLoading } = useTabsInfo(courseId);
+  const { restricted, isPending } = useEnrollmentAccess(courseId, data?.username);
+
+  if (isLoading || isPending) return null;
+  if (restricted) return <Navigate to={`../${defaultLandingTabId}`} replace />;
+  return <>{children}</>;
+};
 
 const TabContent = () => {
   const { tabId } = useParams<{ tabId: string }>();
-  const { defaultTabs, routesSlotId } = useDashboardConfig();
+  const { defaultTabs, routesSlotId, variantId } = useDashboardConfig();
   const routeWidgets = useWidgetProps(routesSlotId) as DashboardRouteProps[];
 
   const tabRoutes = [
@@ -24,6 +36,9 @@ const TabContent = () => {
 
   const foundTab = tabRoutes.find(tab => tab.tabId === tabId);
 
+  if (foundTab && tabId === 'enrollments' && variantId === 'instructorDashboard') {
+    return <EnrollmentAccessGuard>{foundTab.content}</EnrollmentAccessGuard>;
+  }
   return foundTab ? foundTab.content : <PageNotFound />;
 };
 
