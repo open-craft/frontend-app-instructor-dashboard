@@ -11,7 +11,7 @@ export interface DashboardRouteProps {
 
 // Minimal shape shared by both `useCourseInfo` and `useCcxCoachInfo` for the nav.
 export interface DashboardTabsInfo {
-  data?: { tabs?: TabProps[] },
+  data?: { tabs?: TabProps[], username?: string },
   isLoading: boolean,
   error?: unknown,
 }
